@@ -1,0 +1,9 @@
+[Unit]
+Description=Polkadot Disaster Recovery Auto-Healing
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/polkadot-recovery.sh
+# Generous timeout — health check takes ~45s
+TimeoutStartSec=120
