@@ -8,11 +8,12 @@
 #   1. Lock file (prevent concurrent execution)
 #   2. Full stop + zombie kill (anti-equivocation)
 #   3. Verify NO polkadot process is running
-#   4. Auto-detect database directory
-#   5. Purge DB only (keystore + network identity preserved)
-#   6. Restart service → warp sync takes over
-#   7. Post-restart health check (peers + sync status)
-#   8. Notification (optional Discord/Telegram webhook)
+#   4. Disk space check (abort if full — resync would fail anyway)
+#   5. Auto-detect database directory
+#   6. Purge DB only (keystore + network identity preserved)
+#   7. Restart service → warp sync takes over
+#   8. Post-restart health check (peers + sync status)
+#   9. Notification (optional Discord/Telegram webhook)
 # ══════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -23,6 +24,7 @@ BASE_PATH="/var/lib/polkadot"
 CHAIN="polkadot"
 CHAIN_DIR="$BASE_PATH/chains/$CHAIN"
 SERVICE="polkadot"
+DISK_THRESHOLD=95  # Skip recovery if disk usage is above this % (resync would fail anyway)
 
 # Optional notification webhooks (leave empty to disable)
 DISCORD_WEBHOOK=""
@@ -85,7 +87,22 @@ if pgrep -x "polkadot" > /dev/null; then
 fi
 log "✓ No polkadot process running. Safe to proceed."
 
-# ── STEP 2: Auto-detect database directory ──
+# ── STEP 2: Disk space check ──
+# If disk is nearly full, purging and resyncing would just fill it back up
+# and crash loop again. Abort and notify for manual intervention.
+DISK_USAGE=$(df "$BASE_PATH" 2>/dev/null | awk 'NR==2{gsub(/%/,"");print $5}')
+DISK_USAGE=${DISK_USAGE:-0}
+log "Disk usage on $BASE_PATH: ${DISK_USAGE}%"
+
+if [ "$DISK_USAGE" -ge "$DISK_THRESHOLD" ] 2>/dev/null; then
+  log "[CRITICAL] Disk usage is ${DISK_USAGE}% (threshold: ${DISK_THRESHOLD}%)."
+  log "[CRITICAL] ABORTING recovery — resyncing on a full disk would crash loop."
+  log "[CRITICAL] Free up disk space manually, then restart the service."
+  notify "⛔ CRITICAL — Disk is ${DISK_USAGE}% full. Recovery aborted. Free up space manually."
+  exit 1
+fi
+
+# ── STEP 3: Auto-detect database directory ──
 DB_DIR=""
 for candidate in \
   "$CHAIN_DIR/paritydb" \
@@ -122,13 +139,13 @@ else
   log "[INFO] Network identity missing (will be regenerated automatically)"
 fi
 
-# ── STEP 3: Restart ──
+# ── STEP 4: Restart ──
 log "Restarting $SERVICE service (warp sync)..."
 # Reset systemd failure counter to prevent restart refusal
 systemctl reset-failed "$SERVICE" 2>/dev/null || true
 systemctl start "$SERVICE"
 
-# ── STEP 4: Post-restart health check ──
+# ── STEP 5: Post-restart health check ──
 sleep 15
 if systemctl is-active --quiet "$SERVICE"; then
   log "✓ Service $SERVICE is active."
