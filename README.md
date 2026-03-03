@@ -13,6 +13,7 @@ Automatic self-healing when your validator crashes repeatedly. Triggered by syst
 **What it does:**
 - Stops the node and kills any zombie processes
 - Verifies no duplicate process is running (equivocation = slashing)
+- Checks disk space before proceeding (a full disk would just crash loop again after resync)
 - Purges the corrupted database while preserving session keys and network identity
 - Restarts the node (warp sync rebuilds the DB in ~15-30 min)
 - Runs a health check (service status, peer count, sync state)
@@ -24,6 +25,7 @@ Automatic self-healing when your validator crashes repeatedly. Triggered by syst
 **Safety features:**
 - Lock file prevents concurrent execution
 - Auto-detects DB directory (paritydb, rocksdb, db/full)
+- Disk space check before purge (avoids resync crash loop on full disk)
 - Confirms keystore is intact after DB purge
 - Resets systemd failure counter before restart
 - 10-minute stale lock expiry as failsafe
@@ -117,6 +119,7 @@ polkadot.service
     │     └── polkadot-recovery.service
     │           └── polkadot-recovery.sh
     │                 ├── Kill all processes (anti-equivocation)
+    │                 ├── Check disk space (abort if full)
     │                 ├── Purge DB (keep keystore + network)
     │                 ├── Restart → warp sync
     │                 ├── Health check
@@ -138,6 +141,7 @@ polkadot.service
 | `CHAIN` | `polkadot` | Chain name (polkadot, kusama, etc.) |
 | `SERVICE` | `polkadot` | Systemd service name |
 | `DISCORD_WEBHOOK` | *(empty)* | Discord webhook URL for notifications |
+| `DISK_THRESHOLD` | `95` | Skip recovery if disk usage exceeds this % |
 
 ### Payout Script
 
